@@ -114,8 +114,8 @@ task_cmp(gconstpointer a_p, gconstpointer b_p, G_GNUC_UNUSED gpointer user_data)
  * @param cmd_options       Options specified on command line
  * @param current_pkglist   Pointer to a list where basenames of files that
  *                          will be processed will be appended to.
- * @param output_pkg_list   File where relative paths of processed packages
- *                          will be writen to.
+ * @param output_pkg_list   Array where where relative paths of processed packages
+ *                          will be stored into.
  * @return                  Number of packages that are going to be processed
  */
 static long
@@ -123,7 +123,7 @@ fill_pool(GThreadPool *pool,
           gchar *in_dir,
           struct CmdOptions *cmd_options,
           GSList **current_pkglist,
-          FILE *output_pkg_list,
+          GArray *output_pkg_list,
           long *package_count,
           int  media_id)
 {
@@ -203,8 +203,10 @@ fill_pool(GThreadPool *pool,
                     task->full_path = full_path;
                     task->filename = g_strdup(filename);
                     task->path = g_strdup(dirname);
-                    if (output_pkg_list)
-                        fprintf(output_pkg_list, "%s\n", repo_relative_path);
+                    if (output_pkg_list) {
+                        GString *s = g_string_new(repo_relative_path);
+                        g_array_append_val(output_pkg_list, s);
+                    }
                     *current_pkglist = g_slist_prepend(*current_pkglist, task->filename);
                     // TODO: One common path for all tasks with the same path?
                     g_queue_insert_sorted(&queue, task, task_cmp, NULL);
@@ -249,8 +251,10 @@ fill_pool(GThreadPool *pool,
                 task->full_path = full_path;
                 task->filename  = g_strdup(filename);         // foobar.rpm
                 task->path      = strndup(relative_path, x);  // packages/i386/
-                if (output_pkg_list)
-                    fprintf(output_pkg_list, "%s\n", relative_path);
+                if (output_pkg_list) {
+                    GString *s = g_string_new(relative_path);
+                    g_array_append_val(output_pkg_list, s);
+                }
                 *current_pkglist = g_slist_prepend(*current_pkglist, task->filename);
                 g_queue_insert_sorted(&queue, task, task_cmp, NULL);
             }
@@ -452,15 +456,19 @@ main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    // Initialize array for list of packages, if needed
+    GArray *output_pkg_list = NULL;
+
     // Open package list
-    FILE *output_pkg_list = NULL;
+    FILE *output_pkg_list_file = NULL;
     if (cmd_options->read_pkgs_list) {
-        output_pkg_list = fopen(cmd_options->read_pkgs_list, "w");
-        if (!output_pkg_list) {
+        output_pkg_list_file = fopen(cmd_options->read_pkgs_list, "w");
+        if (!output_pkg_list_file) {
             g_critical("Cannot open \"%s\" for writing: %s",
                        cmd_options->read_pkgs_list, g_strerror(errno));
             exit(EXIT_FAILURE);
         }
+        output_pkg_list = g_array_new(FALSE, FALSE, sizeof(GString *));
     }
 
 
@@ -498,8 +506,13 @@ main(int argc, char **argv)
     g_debug("Package count: %ld", package_count);
     g_message("Directory walk done - %ld packages", package_count);
 
-    if (output_pkg_list)
-        fclose(output_pkg_list);
+    if (cmd_options->read_pkgs_list) {
+        for (int i = 0; i < output_pkg_list->len; i++) {
+            GString *s = g_array_index(output_pkg_list, GString *, i);
+            fprintf(output_pkg_list_file, "%s\n", s->str);
+        }
+        fclose(output_pkg_list_file);
+    }
 
 
     // Load old metadata if --update
@@ -1553,6 +1566,9 @@ deltaerror:
 
     // Clean up
     g_debug("Memory cleanup");
+
+    if (output_pkg_list)
+        g_array_free(output_pkg_list, TRUE);
 
     if (old_metadata)
         cr_metadata_free(old_metadata);
