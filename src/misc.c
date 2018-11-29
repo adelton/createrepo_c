@@ -1302,6 +1302,154 @@ cr_run_command(char **cmd, const char *working_dir, GError **err)
     return ret;
 }
 
+static GIOChannel *
+setup_fd_callback(GMainContext *context, gint fd, GIOCondition cond, GSourceFunc func, gpointer user_data)
+{
+    GIOChannel *ioc = g_io_channel_unix_new(fd);
+    g_io_channel_set_encoding(ioc, NULL, NULL);
+    g_io_channel_set_flags(ioc, g_io_channel_get_flags(ioc) | G_IO_FLAG_NONBLOCK, NULL);
+    g_io_channel_set_close_on_unref(ioc, TRUE);
+    GSource *source = g_io_create_watch(ioc, cond);
+    g_io_channel_unref(ioc);
+    g_source_set_callback(source, func, user_data, NULL);
+    g_source_attach(source, context);
+    g_source_unref(source);
+    return ioc;
+}
+
+static gboolean
+read_from_ioc(GIOChannel *ioc, GIOCondition cond, gpointer out)
+{
+    gboolean shutdown = cond & (G_IO_ERR | G_IO_HUP);
+
+    if (cond & (G_IO_IN)) {
+        GIOStatus ret;
+        guint8 buffer[2048];
+        gsize bytes_read;
+        if (g_io_channel_read_chars(ioc, buffer, sizeof(buffer), &bytes_read, NULL) != G_IO_STATUS_NORMAL) {
+            shutdown = TRUE;
+        } else if (bytes_read <= 0) {
+            shutdown = TRUE;
+        } else {
+            g_string_append_len((GString *)out, buffer, bytes_read);
+        }
+    }
+    if (shutdown) {
+        g_io_channel_shutdown(ioc, TRUE, NULL);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+write_to_ioc(GIOChannel *ioc, GIOCondition cond, gpointer data_)
+{
+    gboolean shutdown = cond & (G_IO_ERR | G_IO_HUP);
+
+    if (cond & G_IO_OUT) {
+        cr_run_pipe_command_data *data = (cr_run_pipe_command_data *)data_;
+        if (data->stdin_index >= data->stdin_lines->len) {
+             shutdown = TRUE;
+        } else {
+            GString *line = g_array_index(data->stdin_lines, GString *, data->stdin_index);
+            gsize bytes_written;
+            GError *error = NULL;
+            if (data->stdin_line_offset == line->len) {
+                /* end of line, output newline */
+                if (g_io_channel_write_chars(ioc, "\n", 1, &bytes_written, &error) == G_IO_STATUS_EOF) {
+                    shutdown = TRUE;
+                }
+                if (error) {
+                    data->error = error;
+                    shutdown = TRUE;
+                }
+                if (bytes_written > 0) {
+                    data->stdin_index++;
+                    data->stdin_line_offset = 0;
+                }
+            } else {
+                if (g_io_channel_write_chars(ioc, line->str + data->stdin_line_offset,
+                    line->len - data->stdin_line_offset, &bytes_written, &error) == G_IO_STATUS_EOF) {
+                    shutdown = TRUE;
+                }
+                if (error) {
+                    data->error = error;
+                    shutdown = TRUE;
+                }
+                data->stdin_line_offset += bytes_written;
+            }
+        }
+    }
+
+    if (shutdown) {
+        g_io_channel_shutdown(ioc, TRUE, NULL);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static void
+cr_run_pipe_exit_cb(GPid child_pid, gint status, gpointer user_data_)
+{
+    g_debug("External process %lu exited with status %d\n", (gulong)child_pid, status);
+    cr_run_pipe_command_data *data = (cr_run_pipe_command_data *)user_data_;
+    data->success = cr_spawn_check_exit_status(status, &(data->error));
+    g_main_loop_quit(data->mainloop);
+}
+
+gboolean
+cr_run_pipe_command(cr_run_pipe_command_data *data)
+{
+    data->stdin_index = 0;
+    data->stdin_line_offset = 0;
+    data->stdout = g_string_sized_new(2048);
+    data->stderr = g_string_sized_new(2048);
+
+    GMainContext *context = g_main_context_new();
+    data->mainloop = g_main_loop_new(context, FALSE);
+
+    GPid child_pid;
+    gint stdin_fd;
+    gint stdout_fd;
+    gint stderr_fd;
+
+    GString *in_dir = g_string_append(g_string_new("CREATEREPO_C_IN_DIR="), data->in_dir);
+    GString *out_repo = g_string_append(g_string_new("CREATEREPO_C_OUT_REPO="), data->out_repo);
+    gchar *envp[] = { in_dir->str, out_repo->str, NULL };
+
+    if (!g_spawn_async_with_pipes(
+        NULL,		/* current working directory */
+        data->argv,
+        envp,		/* our environment variables */
+        (GSpawnFlags) G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD
+            | G_SPAWN_CLOEXEC_PIPES,
+        NULL,		/* no pre-exec setup needed */
+        NULL,		/* and so not user data */
+        &child_pid,
+        &stdin_fd,
+        &stdout_fd,
+        &stderr_fd,
+        &(data->error))) {
+        return FALSE;
+    }
+
+    setup_fd_callback(context, stdout_fd, G_IO_IN|G_IO_ERR|G_IO_HUP,
+        (GSourceFunc)read_from_ioc, data->stdout);
+    setup_fd_callback(context, stderr_fd, G_IO_IN|G_IO_ERR|G_IO_HUP,
+        (GSourceFunc)read_from_ioc, data->stderr);
+    GIOChannel *stdin_ioc = setup_fd_callback(context, stdin_fd, G_IO_OUT|G_IO_ERR|G_IO_HUP,
+        (GSourceFunc)write_to_ioc, data);
+
+    GSource *pid_source = g_child_watch_source_new(child_pid);
+    g_source_attach(pid_source, context);
+    g_source_set_callback(pid_source, (GSourceFunc)cr_run_pipe_exit_cb, data, NULL);
+
+    g_main_loop_run(data->mainloop);
+    g_main_loop_unref(data->mainloop);
+    g_main_context_unref(context);
+    return data->success;
+}
+
 gboolean
 cr_cp(const char *src,
       const char *dst,

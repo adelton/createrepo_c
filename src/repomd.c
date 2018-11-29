@@ -53,7 +53,7 @@ cr_distrotag_new()
 }
 
 cr_RepomdRecord *
-cr_repomd_record_new(const char *type, const char *path)
+cr_repomd_record_subpath_new(const char *type, const char *path, const char *base)
 {
     cr_RepomdRecord *md = g_malloc0(sizeof(*md));
     md->chunk = g_string_chunk_new(128);
@@ -62,14 +62,28 @@ cr_repomd_record_new(const char *type, const char *path)
     md->size_header = G_GINT64_CONSTANT(-1);
 
     if (path) {
-        gchar *filename = cr_get_filename(path);
-        gchar *location_href = g_strconcat(LOCATION_HREF_PREFIX, filename, NULL);
-        md->location_real = g_string_chunk_insert(md->chunk, path);
+        gchar *location_href;
+        if (base) {
+            gchar *location_real = g_strconcat(base, "/", path, NULL);
+            md->location_real = g_string_chunk_insert(md->chunk, location_real);
+            g_free(location_real);
+            location_href = g_strconcat(LOCATION_HREF_PREFIX, path, NULL);
+        } else {
+            md->location_real = g_string_chunk_insert(md->chunk, path);
+            gchar *filename = cr_get_filename(path);
+            location_href = g_strconcat(LOCATION_HREF_PREFIX, filename, NULL);
+        }
         md->location_href = g_string_chunk_insert(md->chunk, location_href);
         g_free(location_href);
     }
 
     return md;
+}
+
+cr_RepomdRecord *
+cr_repomd_record_new(const char *type, const char *path)
+{
+    return cr_repomd_record_subpath_new(type, path, NULL);
 }
 
 void

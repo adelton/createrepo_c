@@ -65,6 +65,8 @@ struct CmdOptions _cmd_options = {
 
         .zck_compression            = FALSE,
         .zck_dict_dir               = NULL,
+        
+	.ext_data_command           = NULL,
     };
 
 
@@ -197,6 +199,9 @@ static GOptionEntry cmd_entries[] =
       "Checksum type to be used in repomd.xml", "CHECKSUM_TYPE"},
     { "error-exit-val", 0, 0, G_OPTION_ARG_NONE, &(_cmd_options.error_exit_val),
       "Exit with retval 2 if there were any errors during processing", NULL },
+    { "ext-data-command", 0, 0, G_OPTION_ARG_STRING, &(_cmd_options.ext_data_command),
+      "External command to generate additional data.",
+      "COMMAND" },
     { NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL },
 };
 

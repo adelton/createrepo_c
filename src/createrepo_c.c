@@ -468,6 +468,9 @@ main(int argc, char **argv)
                        cmd_options->read_pkgs_list, g_strerror(errno));
             exit(EXIT_FAILURE);
         }
+    }
+
+    if (cmd_options->read_pkgs_list || cmd_options->ext_data_command) {
         output_pkg_list = g_array_new(FALSE, FALSE, sizeof(GString *));
     }
 
@@ -505,6 +508,20 @@ main(int argc, char **argv)
 
     g_debug("Package count: %ld", package_count);
     g_message("Directory walk done - %ld packages", package_count);
+
+    GThread *ext_data_command_thread = NULL;
+    cr_run_pipe_command_data ext_data_command_data;
+    if (cmd_options->ext_data_command) {
+        g_debug("Will call external command [%s]", cmd_options->ext_data_command);
+        ext_data_command_data.argv = g_strsplit(cmd_options->ext_data_command, ",", 0);
+        ext_data_command_data.stdin_lines = output_pkg_list;
+        ext_data_command_data.success = FALSE;
+        ext_data_command_data.error = NULL;
+        ext_data_command_data.in_dir = in_dir;
+        ext_data_command_data.out_repo = tmp_out_repo;
+
+        ext_data_command_thread = g_thread_new("ext_data_command", cr_run_pipe_command, &ext_data_command_data);
+    }
 
     if (cmd_options->read_pkgs_list) {
         for (int i = 0; i < output_pkg_list->len; i++) {
@@ -1458,6 +1475,29 @@ deltaerror:
 
     if (cmd_options->revision)
         cr_repomd_set_revision(repomd_obj, cmd_options->revision);
+
+    if (ext_data_command_thread) {
+        if (! g_thread_join(ext_data_command_thread)) {
+            g_critical("External command [%s] failed: %s\n%*s",
+                cmd_options->ext_data_command, ext_data_command_data.error->message,
+                ext_data_command_data.stderr->len, ext_data_command_data.stderr->str);
+            exit(EXIT_FAILURE);
+        } else {
+            gchar **ext_lines = g_strsplit(ext_data_command_data.stdout->str, "\n", 0);
+            while (*ext_lines && **ext_lines) {
+                g_debug("ext command output: [%s]", *ext_lines);
+                gchar **words = g_strsplit(*ext_lines, " ", 2);
+                if (*words && *(words + 1)) {
+                    GError *tmp_err;
+                    cr_RepomdRecord *ext_data_rec = cr_repomd_record_subpath_new(*words,
+			*(words + 1), ext_data_command_data.out_repo);
+                    cr_repomd_record_fill(ext_data_rec, cmd_options->repomd_checksum_type, &tmp_err);
+                    cr_repomd_set_record(repomd_obj, ext_data_rec);
+                }
+                *ext_lines++;
+            }
+        }
+    }
 
     cr_repomd_sort_records(repomd_obj);
 

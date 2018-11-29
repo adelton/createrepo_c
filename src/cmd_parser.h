@@ -108,6 +108,7 @@ struct CmdOptions {
                                      during repodata generation. */
     gchar *repomd_checksum;     /*!< Checksum type for entries in repomd.xml */
     gboolean error_exit_val;        /*!< exit 2 on processing errors */
+    char *ext_data_command;         /*!< External command to generate additional files */
 
     /* Items filled by check_arguments() */
 

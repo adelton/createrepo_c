@@ -552,6 +552,28 @@ gchar *
 cr_get_dict_file(const gchar *dir,
                  const gchar *file);
 
+/** Input, output, and progress for cr_run_pipe_command */
+typedef struct {
+    char **argv;		/*!< NULL-terminated command and arguments */
+    GArray *stdin_lines;	/*!< GStrings to be written as lines to the process*/
+    int stdin_index;		/*!< current line number to be written */
+    int stdin_line_offset;	/*!< position on the current line */
+    GString *stdout;		/*!< stdout from the process */
+    GString *stderr;		/*!< stderr from the process */
+    GError *error;		/*!< error, if one occured */
+    gboolean success;		/*!< whether the process finished successfully */
+    GMainLoop *mainloop;	/*!< the GMainLoop handling the process */
+    gchar *in_dir;		/*!< input directory where rpm files are */
+    gchar *out_repo;		/*!< output directory where repodata gets generated */
+} cr_run_pipe_command_data;
+
+/** Run command, feed it lines of input and produce stdout and stderr
+ * @param data
+ * @return		true for success, false for failure
+ */
+gboolean
+cr_run_pipe_command(cr_run_pipe_command_data *data);
+
 /** @} */
 
 #ifdef __cplusplus

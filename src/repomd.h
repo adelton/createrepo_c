@@ -119,6 +119,13 @@ typedef struct {
 /** Creates (alloc) new cr_RepomdRecord object
  * @param type                  Type of record ("primary", "filelists", ..)
  * @param path                  path to the compressed file
+ * @param base                  base directory of the relative path
+ */
+cr_RepomdRecord *cr_repomd_record_subpath_new(const char *type, const char *path, const char *base);
+
+/** Creates (alloc) new cr_RepomdRecord object
+ * @param type                  Type of record ("primary", "filelists", ..)
+ * @param path                  path to the compressed file
  */
 cr_RepomdRecord *cr_repomd_record_new(const char *type, const char *path);
 
