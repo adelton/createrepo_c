@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -e
+
+SWIDTAGDIR=swidtag
+
+rm -rf "$CREATEREPO_C_OUT_REPO$SWIDTAGDIR"
+while read i ; do
+	echo "$CREATEREPO_C_IN_DIR$i"
+done | xargs rpm2swidtag --output-dir="$CREATEREPO_C_OUT_REPO$SWIDTAGDIR"/. "$@" -p
+
+(
+	cd $CREATEREPO_C_OUT_REPO
+	find $SWIDTAGDIR -type f | while read i ; do
+		gzip $i
+		echo "swidtag $i.gz"
+	done
+)

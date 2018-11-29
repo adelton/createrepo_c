@@ -758,6 +758,31 @@ cr_repomd_free(cr_Repomd *repomd)
     g_free(repomd);
 }
 
+static gint
+record_type_value(const char *type) {
+    if (!g_strcmp0(type, "primary"))
+        return 1;
+    if (!g_strcmp0(type, "filelists"))
+        return 2;
+    if (!g_strcmp0(type, "other"))
+        return 3;
+    if (!g_strcmp0(type, "primary_db"))
+        return 4;
+    if (!g_strcmp0(type, "filelists_db"))
+        return 5;
+    if (!g_strcmp0(type, "other_db"))
+        return 6;
+    if (!g_strcmp0(type, "primary_zck"))
+        return 7;
+    if (!g_strcmp0(type, "filelists_zck"))
+        return 8;
+    if (!g_strcmp0(type, "other_zck"))
+        return 9;
+    if (!g_strcmp0(type, "swidtag"))
+        return 100;
+    return 1000;
+}
+
 void
 cr_repomd_set_record(cr_Repomd *repomd,
                      cr_RepomdRecord *record)
@@ -765,10 +790,12 @@ cr_repomd_set_record(cr_Repomd *repomd,
     if (!repomd || !record) return;
 
     cr_RepomdRecord *delrec = NULL;
-    // Remove all existing record of the same type
-    while((delrec = cr_repomd_get_record(repomd, record->type)) != NULL) {
-	cr_repomd_detach_record(repomd, delrec);
-	cr_repomd_record_free(delrec);
+    // Remove all existing record of the same type, except for swidtag
+    if (record_type_value(record->type) < 100) {
+        while((delrec = cr_repomd_get_record(repomd, record->type)) != NULL) {
+	    cr_repomd_detach_record(repomd, delrec);
+	    cr_repomd_record_free(delrec);
+        }
     }
 
     repomd->records = g_slist_append(repomd->records, record);
@@ -856,29 +883,6 @@ cr_repomd_get_record(cr_Repomd *repomd, const char *type)
             return rec;
     }
     return NULL;
-}
-
-static gint
-record_type_value(const char *type) {
-    if (!g_strcmp0(type, "primary"))
-        return 1;
-    if (!g_strcmp0(type, "filelists"))
-        return 2;
-    if (!g_strcmp0(type, "other"))
-        return 3;
-    if (!g_strcmp0(type, "primary_db"))
-        return 4;
-    if (!g_strcmp0(type, "filelists_db"))
-        return 5;
-    if (!g_strcmp0(type, "other_db"))
-        return 6;
-    if (!g_strcmp0(type, "primary_zck"))
-        return 7;
-    if (!g_strcmp0(type, "filelists_zck"))
-        return 8;
-    if (!g_strcmp0(type, "other_zck"))
-        return 9;
-    return 10;
 }
 
 static gint
